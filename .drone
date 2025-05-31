@@ -1,0 +1,416 @@
+kind: pipeline
+type: kubernetes
+name: default
+
+workspace:
+ base: /go
+ path: /src/github.com/otsofintech/public-repo-test
+
+trigger:
+  ref:
+    - refs/tags/**
+  event:
+    - tag
+    - promote
+
+steps:
+  - name: fetch
+    when:
+      event:
+        - tag
+    image: plugins/git
+    commands:
+      - git fetch --tags --depth=50
+
+  - name: testing
+    when:
+      event:
+        - tag
+    image: golang:1.22
+    commands:
+      - go test -v ./...
+      - go vet
+    depends_on:
+      - fetch
+
+  - name: build_linux_amd64
+    when:
+      event:
+        - tag
+    image: golang:1.22
+    commands:
+      - make build_linux_amd64
+    depends_on:
+      - testing
+
+  # Azure Container Registry - 保持原有流程
+  - name: docker_tag_azure
+    when:
+      event:
+        - tag
+    image: plugins/docker
+    depends_on:
+      - build_linux_amd64
+    settings:
+      registry: otsosofinx.azurecr.io
+      repo: otsosofinx.azurecr.io/public-repo-test
+      auto_tag: true
+      dockerfile: Dockerfile
+      username: otsosofinx
+      password:
+        from_secret: sofinx_acr_password
+
+  # AWS ECR - 新增 AWS 支援
+  - name: docker_tag_aws
+    when:
+      event:
+        - tag
+    image: plugins/docker
+    depends_on:
+      - build_linux_amd64
+    settings:
+      registry: 
+        from_secret: aws_ecr_registry_url  # e.g., 123456789012.dkr.ecr.us-west-2.amazonaws.com
+      repo: 
+        from_secret: aws_ecr_repo_name     # e.g., 123456789012.dkr.ecr.us-west-2.amazonaws.com/public-repo-test
+      auto_tag: true
+      dockerfile: Dockerfile
+      username: AWS
+      password:
+        from_secret: aws_ecr_password
+
+  # =================== Azure AKS 部署 (保持原有流程) ===================
+  - name: deploy_to_dev_azure
+    when:
+      event:
+        - promote
+      target:
+        - develop
+        - azure-develop
+    image: pelotech/drone-helm3
+    environment:
+      REDIS_HOST:
+        from_secret: sofinx_redis_host_dev
+      REDIS_PASSWORD:
+        from_secret: sofinx_redis_password_dev
+      AZURE_STORAGE_ACCOUNT:
+        from_secret: sofinx_azure_storage_account_dev
+      AZURE_STORAGE_ACCESS_KEY:
+        from_secret: sofinx_azure_storage_access_key_dev
+      UNIVERSE_DEX_BROKER_SECRET:
+        from_secret: universe_dex_broker_secret
+    settings:
+      values:
+        - latest=true
+        - image.tag=${DRONE_TAG}
+        - target=dev
+        - cloud_provider=azure
+        - image.repository=otsosofinx.azurecr.io/public-repo-test
+        - redis_host=$REDIS_HOST
+        - redis_password=$REDIS_PASSWORD
+        - azure_storage_account=$AZURE_STORAGE_ACCOUNT
+        - azure_storage_access_key=$AZURE_STORAGE_ACCESS_KEY
+        - universe_dex_broker_secret=$UNIVERSE_DEX_BROKER_SECRET
+      kube_api_server:
+        from_secret: sofinx_kubernetes_server_dev
+      kube_token:
+        from_secret: sofinx_kubernetes_token_dev
+      kube_certificate:
+        from_secret: sofinx_kubernetes_ca_dev
+      mode: upgrade
+      kube_service_account: helm
+      wait_for_upgrade: true
+      skip_tls_verify: true
+      chart: ./helm
+      release: public-repo-test
+      values_files: ["./helm/values.yaml"]
+      namespace: default
+    depends_on:
+      - docker_tag_azure
+
+  - name: deploy_to_test_azure
+    when:
+      event:
+        - promote
+      target:
+        - test
+        - azure-test
+    image: pelotech/drone-helm3
+    environment:
+      REDIS_HOST:
+        from_secret: sofinx_redis_host_test
+      REDIS_PASSWORD:
+        from_secret: sofinx_redis_password_test
+      AZURE_STORAGE_ACCOUNT:
+        from_secret: sofinx_azure_storage_account_test
+      AZURE_STORAGE_ACCESS_KEY:
+        from_secret: sofinx_azure_storage_access_key_test
+      UNIVERSE_DEX_BROKER_SECRET:
+        from_secret: universe_dex_broker_secret
+    settings:
+      values:
+        - latest=true
+        - target=stag
+        - image.tag=${DRONE_TAG}
+        - cloud_provider=azure
+        - image.repository=otsosofinx.azurecr.io/public-repo-test
+        - redis_host=$REDIS_HOST
+        - redis_password=$REDIS_PASSWORD
+        - azure_storage_account=$AZURE_STORAGE_ACCOUNT
+        - azure_storage_access_key=$AZURE_STORAGE_ACCESS_KEY
+        - universe_dex_broker_secret=$UNIVERSE_DEX_BROKER_SECRET
+      kube_api_server:
+        from_secret: sofinx_kubernetes_server_test
+      kube_token:
+        from_secret: sofinx_kubernetes_token_test
+      kube_certificate:
+        from_secret: sofinx_kubernetes_ca_test
+      mode: upgrade
+      kube_service_account: helm
+      wait_for_upgrade: true
+      skip_tls_verify: true
+      chart: ./helm
+      release: public-repo-test
+      values_files: ["./helm/values.yaml"]
+      namespace: default
+    depends_on:
+      - docker_tag_azure
+
+  - name: deploy_to_prod_azure
+    when:
+      event:
+        - promote
+      target:
+        - production
+        - azure-production
+    image: pelotech/drone-helm3
+    environment:
+      REDIS_HOST:
+        from_secret: sofinx_redis_host_prod
+      REDIS_PASSWORD:
+        from_secret: sofinx_redis_password_prod
+      AZURE_STORAGE_ACCOUNT:
+        from_secret: sofinx_azure_storage_account_prod
+      AZURE_STORAGE_ACCESS_KEY:
+        from_secret: sofinx_azure_storage_access_key_prod
+      UNIVERSE_DEX_BROKER_SECRET:
+        from_secret: universe_dex_broker_secret
+    settings:
+      values:
+        - target=prod
+        - image.tag=${DRONE_TAG}
+        - cloud_provider=azure
+        - image.repository=otsosofinx.azurecr.io/public-repo-test
+        - redis_host=$REDIS_HOST
+        - redis_password=$REDIS_PASSWORD
+        - azure_storage_account=$AZURE_STORAGE_ACCOUNT
+        - azure_storage_access_key=$AZURE_STORAGE_ACCESS_KEY
+        - universe_dex_broker_secret=$UNIVERSE_DEX_BROKER_SECRET
+      kube_api_server:
+        from_secret: sofinx_kubernetes_server_prod
+      kube_token:
+        from_secret: sofinx_kubernetes_token_prod
+      kube_certificate:
+        from_secret: sofinx_kubernetes_ca_prod
+      mode: upgrade
+      kube_service_account: helm
+      wait_for_upgrade: true
+      skip_tls_verify: true
+      chart: ./helm
+      release: public-repo-test-${DRONE_TAG:0:2}
+      values_files: ["./helm/values.yaml"]
+      namespace: default
+    depends_on:
+      - docker_tag_azure
+
+  # =================== AWS EKS 部署 (新增) ===================
+  - name: deploy_to_dev_aws
+    when:
+      event:
+        - promote
+      target:
+        - aws-develop
+    image: pelotech/drone-helm3
+    environment:
+      AWS_REGION:
+        from_secret: aws_region
+      REDIS_HOST:
+        from_secret: aws_redis_host_dev
+      REDIS_PASSWORD:
+        from_secret: aws_redis_password_dev
+      S3_BUCKET:
+        from_secret: aws_s3_bucket_dev
+      AWS_ACCESS_KEY_ID:
+        from_secret: aws_access_key_id_dev
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: aws_secret_access_key_dev
+      UNIVERSE_DEX_BROKER_SECRET:
+        from_secret: universe_dex_broker_secret
+    settings:
+      values:
+        - latest=true
+        - image.tag=${DRONE_TAG}
+        - target=dev
+        - cloud_provider=aws
+        - image.repository=${ECR_REPO_URL}
+        - aws_region=$AWS_REGION
+        - redis_host=$REDIS_HOST
+        - redis_password=$REDIS_PASSWORD
+        - s3_bucket=$S3_BUCKET
+        - aws_access_key_id=$AWS_ACCESS_KEY_ID
+        - aws_secret_access_key=$AWS_SECRET_ACCESS_KEY
+        - universe_dex_broker_secret=$UNIVERSE_DEX_BROKER_SECRET
+      kube_api_server:
+        from_secret: aws_kubernetes_server_dev
+      kube_token:
+        from_secret: aws_kubernetes_token_dev
+      kube_certificate:
+        from_secret: aws_kubernetes_ca_dev
+      mode: upgrade
+      kube_service_account: helm
+      wait_for_upgrade: true
+      skip_tls_verify: true
+      chart: ./helm
+      release: public-repo-test
+      values_files: ["./helm/values.yaml", "./helm/values-aws.yaml"]
+      namespace: default
+    depends_on:
+      - docker_tag_aws
+
+  - name: deploy_to_test_aws
+    when:
+      event:
+        - promote
+      target:
+        - aws-test
+    image: pelotech/drone-helm3
+    environment:
+      AWS_REGION:
+        from_secret: aws_region
+      REDIS_HOST:
+        from_secret: aws_redis_host_test
+      REDIS_PASSWORD:
+        from_secret: aws_redis_password_test
+      S3_BUCKET:
+        from_secret: aws_s3_bucket_test
+      AWS_ACCESS_KEY_ID:
+        from_secret: aws_access_key_id_test
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: aws_secret_access_key_test
+      UNIVERSE_DEX_BROKER_SECRET:
+        from_secret: universe_dex_broker_secret
+    settings:
+      values:
+        - latest=true
+        - target=stag
+        - image.tag=${DRONE_TAG}
+        - cloud_provider=aws
+        - image.repository=${ECR_REPO_URL}
+        - aws_region=$AWS_REGION
+        - redis_host=$REDIS_HOST
+        - redis_password=$REDIS_PASSWORD
+        - s3_bucket=$S3_BUCKET
+        - aws_access_key_id=$AWS_ACCESS_KEY_ID
+        - aws_secret_access_key=$AWS_SECRET_ACCESS_KEY
+        - universe_dex_broker_secret=$UNIVERSE_DEX_BROKER_SECRET
+      kube_api_server:
+        from_secret: aws_kubernetes_server_test
+      kube_token:
+        from_secret: aws_kubernetes_token_test
+      kube_certificate:
+        from_secret: aws_kubernetes_ca_test
+      mode: upgrade
+      kube_service_account: helm
+      wait_for_upgrade: true
+      skip_tls_verify: true
+      chart: ./helm
+      release: public-repo-test
+      values_files: ["./helm/values.yaml", "./helm/values-aws.yaml"]
+      namespace: default
+    depends_on:
+      - docker_tag_aws
+
+  - name: deploy_to_prod_aws
+    when:
+      event:
+        - promote
+      target:
+        - aws-production
+    image: pelotech/drone-helm3
+    environment:
+      AWS_REGION:
+        from_secret: aws_region
+      REDIS_HOST:
+        from_secret: aws_redis_host_prod
+      REDIS_PASSWORD:
+        from_secret: aws_redis_password_prod
+      S3_BUCKET:
+        from_secret: aws_s3_bucket_prod
+      AWS_ACCESS_KEY_ID:
+        from_secret: aws_access_key_id_prod
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: aws_secret_access_key_prod
+      UNIVERSE_DEX_BROKER_SECRET:
+        from_secret: universe_dex_broker_secret
+    settings:
+      values:
+        - target=prod
+        - image.tag=${DRONE_TAG}
+        - cloud_provider=aws
+        - image.repository=${ECR_REPO_URL}
+        - aws_region=$AWS_REGION
+        - redis_host=$REDIS_HOST
+        - redis_password=$REDIS_PASSWORD
+        - s3_bucket=$S3_BUCKET
+        - aws_access_key_id=$AWS_ACCESS_KEY_ID
+        - aws_secret_access_key=$AWS_SECRET_ACCESS_KEY
+        - universe_dex_broker_secret=$UNIVERSE_DEX_BROKER_SECRET
+      kube_api_server:
+        from_secret: aws_kubernetes_server_prod
+      kube_token:
+        from_secret: aws_kubernetes_token_prod
+      kube_certificate:
+        from_secret: aws_kubernetes_ca_prod
+      mode: upgrade
+      kube_service_account: helm
+      wait_for_upgrade: true
+      skip_tls_verify: true
+      chart: ./helm
+      release: public-repo-test-${DRONE_TAG:0:2}
+      values_files: ["./helm/values.yaml", "./helm/values-aws.yaml"]
+      namespace: default
+    depends_on:
+      - docker_tag_aws
+
+  # =================== 通知步驟 ===================
+  - name: notify_telegram
+    image: appleboy/drone-telegram
+    depends_on:
+      - deploy_to_dev_azure
+      - deploy_to_test_azure
+      - deploy_to_prod_azure
+      - deploy_to_dev_aws
+      - deploy_to_test_aws
+      - deploy_to_prod_aws
+    when: 
+      event:
+        - promote
+      target:
+        - develop
+        - test
+        - production
+        - azure-develop
+        - azure-test
+        - azure-production
+        - aws-develop
+        - aws-test
+        - aws-production
+      status:
+        - success
+        - failure
+    settings:
+      token: 1445829015:AAHOABa6fLvfbBMLRC5V1zvFKR0moNnJr2o
+      to: -424119807
+      message: >
+        public-repo-test ${DRONE_TAG} 部署到 ${DRONE_DEPLOY_TO} CI/CD 完成! 🎉
+        雲端平台: {{ if contains(DRONE_DEPLOY_TO, "aws") }}AWS EKS{{ else }}Azure AKS{{ end }}

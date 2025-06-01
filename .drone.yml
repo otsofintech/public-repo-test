@@ -12,7 +12,8 @@ trigger:
   event:
     - tag
     - promote
-
+clone:
+  disable: true  # 🚫 取消自動 clone
 steps:
   - name: debug-github-connection
     image: alpine:latest
@@ -33,6 +34,13 @@ steps:
       - echo "=== Check network interfaces ==="
       - ip addr
       - echo "=== Done ==="
+  - name: clone
+    image: plugins/git
+    commands:
+      - git clone https://github.com/otsofintech/public-repo-test.git
+      - cd public-repo-test
+      - git checkout ${DRONE_TAG}
+      - git pull origin ${DRONE_TAG}
   - name: fetch
     when:
       event:

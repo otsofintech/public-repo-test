@@ -16,10 +16,9 @@ clone:
   disable: true  # 🚫 取消自動 clone
 steps:
   - name: debug-github-connection
-    image: ubuntu:latest
+    image: curlimages/curl:latest
     commands:
       - echo "=== Check connectivity to GitHub (curl) ==="
-      - apt-get update && apt-get install -y curl dnsutils procps
       - |
         for i in {1..3}; do
           if curl -I https://github.com; then
@@ -32,10 +31,10 @@ steps:
             exit 1
           fi
         done
-      - echo "=== Check DNS resolution (dig) ==="
+      - echo "=== Check DNS resolution (nslookup) ==="
       - |
         for i in {1..3}; do
-          if dig github.com; then
+          if nslookup github.com; then
             break
           fi
           echo "Attempt $i failed, retrying in 5 seconds..."
@@ -46,15 +45,15 @@ steps:
           fi
         done
       - echo "=== Check ephemeral port range ==="
-      - cat /proc/sys/net/ipv4/ip_local_port_range
+      - cat /proc/sys/net/ipv4/ip_local_port_range || true
       - echo "=== Check TCP TIME_WAIT reuse ==="
-      - cat /proc/sys/net/ipv4/tcp_fin_timeout
-      - cat /proc/sys/net/ipv4/tcp_tw_reuse
+      - cat /proc/sys/net/ipv4/tcp_fin_timeout || true
+      - cat /proc/sys/net/ipv4/tcp_tw_reuse || true
       - cat /proc/sys/net/ipv4/tcp_tw_recycle || true
       - echo "=== List current socket summary ==="
-      - ss -s
+      - ss -s || true
       - echo "=== Check network interfaces ==="
-      - ip addr
+      - ip addr || true
       - echo "=== Done ==="
   - name: clone
     image: plugins/git

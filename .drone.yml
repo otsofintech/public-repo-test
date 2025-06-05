@@ -21,7 +21,6 @@ steps:
       - GIT_TRACE=1 GIT_TRACE_PACK_ACCESS=1 
         GIT_TRACE_PACKET=1 GIT_TRACE_PERFORMANCE=1 
         GIT_CURL_VERBOSE=1 git clone https://github.com/otsofintech/public-repo-test.git
-
   - name: debug-github-connection
     image: curlimages/curl:latest
     commands:

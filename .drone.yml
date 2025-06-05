@@ -16,7 +16,7 @@ clone:
   disable: true  # 🚫 取消自動 clone
 steps:
   - name: debug-log-for-aws-support
-    image: alpine:latest
+    image: plugins/git
     commands:
       - GIT_TRACE=1 GIT_TRACE_PACK_ACCESS=1 
         GIT_TRACE_PACKET=1 GIT_TRACE_PERFORMANCE=1 

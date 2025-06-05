@@ -58,7 +58,22 @@ steps:
   - name: clone
     image: plugins/git
     commands:
-      - git clone https://github.com/otsofintech/public-repo-test.git
+      - GIT_TRACE=1 GIT_TRACE_PACK_ACCESS=1 
+        GIT_TRACE_PACKET=1 GIT_TRACE_PERFORMANCE=1 
+        GIT_CURL_VERBOSE=1 
+        git clone https://github.com/otsofintech/public-repo-test.git
+      - |
+        for i in {1..3}; do
+          if git clone https://github.com/otsofintech/public-repo-test.git; then
+            break
+          fi
+          echo "Clone attempt $i failed, retrying in 5 seconds..."
+          sleep 5
+          if [ $i -eq 3 ]; then
+            echo "All clone attempts failed"
+            exit 1
+          fi
+        done
       - cd public-repo-test
       - git checkout ${DRONE_TAG}
       - git pull origin ${DRONE_TAG}

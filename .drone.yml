@@ -480,8 +480,9 @@ steps:
         - success
         - failure
     settings:
-      token: 1445829015:AAHOABa6fLvfbBMLRC5V1zvFKR0moNnJr2o
-      to: -424119807
+      token:
+        from_secret: telegram_token
+      to: "-5599705823"
       message: >
         public-repo-test ${DRONE_TAG} 部署到 ${DRONE_DEPLOY_TO} CI/CD 完成! 🎉
         雲端平台: {{ if contains(DRONE_DEPLOY_TO, "aws") }}AWS EKS{{ else }}Azure AKS{{ end }}
